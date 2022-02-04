@@ -14,8 +14,6 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     var bird:SKSpriteNode!    // 追加
     var ringoNode:SKNode!
     var ringo:SKSpriteNode!
-    var nashiNode:SKNode!
-    var nashi:SKSpriteNode!
     
     // 衝突判定カテゴリー ↓追加
     let birdCategory: UInt32 = 1 << 0       // 0...00001
@@ -23,7 +21,6 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     let wallCategory: UInt32 = 1 << 2       // 0...00100
     let scoreCategory: UInt32 = 1 << 3      // 0...01000
     let ringoCategory: UInt32 = 1 << 4
-    let nashiCategory: UInt32 = 1 << 5
 
     // スコア用
     var score = 0  // ←追加
@@ -57,9 +54,6 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         ringoNode = SKNode()
         scrollNode.addChild(ringoNode)
         
-        nashiNode = SKNode()
-        scrollNode.addChild(nashiNode)
-        
         // 各種スプライトを生成する処理をメソッドに分割
         setupGround()
         setupCloud()
@@ -67,7 +61,6 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
         setupBird()   // 追加
         setupScoreLabel()   // 追加
         setupRingo()
-        setupNashi()
     }
 
     func setupGround() {
@@ -253,8 +246,8 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
 
         // 衝突のカテゴリー設定
         bird.physicsBody?.categoryBitMask = birdCategory    // ←追加
-        bird.physicsBody?.collisionBitMask = groundCategory | wallCategory | ringoCategory | nashiCategory   // ←追加
-        bird.physicsBody?.contactTestBitMask = groundCategory | wallCategory | ringoCategory | nashiCategory   // ←追加
+        bird.physicsBody?.collisionBitMask = groundCategory | wallCategory | ringoCategory   // ←追加
+        bird.physicsBody?.contactTestBitMask = groundCategory | wallCategory | ringoCategory   // ←追加
 
         // アニメーションを設定
         bird.run(flap)
@@ -265,51 +258,64 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     
     // SKPhysicsContactDelegateのメソッド。衝突したときに呼ばれる
     func didBegin(_ contact: SKPhysicsContact) {
-        // ゲームオーバーのときは何もしない
-        if scrollNode.speed <= 0 {
-            return
-        }
-
-        if (contact.bodyA.categoryBitMask & scoreCategory) == scoreCategory || (contact.bodyB.categoryBitMask & scoreCategory) == scoreCategory {
-            // スコア用の物体と衝突した
-            print("ScoreUp")
-            score += 1
-            scoreLabelNode.text = "Score:\(score)"    // ←追加
-            
-            // ベストスコア更新か確認する --- ここから ---
-            var bestScore = userDefaults.integer(forKey: "BEST")
-            if score > bestScore {
-                bestScore = score
-                bestScoreLabelNode.text = "Best Score:\(bestScore)"    // ←追加
-                userDefaults.set(bestScore, forKey: "BEST")
-                userDefaults.synchronize()
-            } // --- ここまで追加---
-            
-        } else if ringo != nil && ringo.parent != nil && ((contact.bodyA.categoryBitMask & ringoCategory) == ringoCategory || (contact.bodyB.categoryBitMask & ringoCategory) == ringoCategory){
-            let fadeOut = SKAction.fadeOut(withDuration: 0)
-            ringo.run(fadeOut)
-            print("GetRingo")
-            ringoScore += 1
-            ringoScoreLabelNode.text = "Item Score:\(ringoScore)"
-            self.run(getRingoSound)
-        } else if nashi != nil && nashi.parent != nil && ((contact.bodyA.categoryBitMask & nashiCategory) == nashiCategory || (contact.bodyB.categoryBitMask & nashiCategory) == nashiCategory){
-            let fadeOut = SKAction.fadeOut(withDuration: 0)
-            nashi.run(fadeOut)
-            print("GetNashi")
-            self.run(getNashiSound)
+        var firstBody: SKPhysicsBody
+        var secondBody: SKPhysicsBody
+        
+        // bird → firstBody
+        if contact.bodyA.categoryBitMask < contact.bodyB.categoryBitMask {
+            firstBody = contact.bodyA
+            secondBody = contact.bodyB
         } else {
-            // 壁か地面と衝突した
-            print("GameOver")
+            firstBody = contact.bodyB
+            secondBody = contact.bodyA
+        }
+        
+        // 多重衝突防止処理
+        if (firstBody.node?.parent != nil && secondBody.node?.parent != nil) {
+            // ゲームオーバーのときは何もしない
+            if scrollNode.speed <= 0 {
+                return
+            }
 
-            // スクロールを停止させる
-            scrollNode.speed = 0
+            if (firstBody.categoryBitMask & scoreCategory) == scoreCategory || (secondBody.categoryBitMask & scoreCategory) == scoreCategory {
+                // スコア用の物体と衝突した
+                print("ScoreUp")
+                score += 1
+                scoreLabelNode.text = "Score:\(score)"    // ←追加
+            
+                // ベストスコア更新か確認する --- ここから ---
+                var bestScore = userDefaults.integer(forKey: "BEST")
+                if score > bestScore {
+                    bestScore = score
+                    bestScoreLabelNode.text = "Best Score:\(bestScore)"    // ←追加
+                    userDefaults.set(bestScore, forKey: "BEST")
+                    userDefaults.synchronize()
+                } // --- ここまで追加---
+            
+            } else if ringo != nil && ringo.parent != nil && ((firstBody.categoryBitMask & ringoCategory) == ringoCategory || (secondBody.categoryBitMask & ringoCategory) == ringoCategory){
+                // りんごと衝突した
+                print("GetRingo")
+                
+                // ringoのSKSpriteNodeを削除
+                secondBody.node?.removeFromParent()
+                
+                ringoScore += 1
+                ringoScoreLabelNode.text = "Item Score:\(ringoScore)"
+                self.run(getRingoSound)
+            } else {
+                // 壁か地面と衝突した
+                print("GameOver")
 
-            bird.physicsBody?.collisionBitMask = groundCategory
+                // スクロールを停止させる
+                scrollNode.speed = 0
 
-            let roll = SKAction.rotate(byAngle: CGFloat(Double.pi) * CGFloat(bird.position.y) * 0.01, duration:1)
-            bird.run(roll, completion:{
+                bird.physicsBody?.collisionBitMask = groundCategory
+
+                let roll = SKAction.rotate(byAngle: CGFloat(Double.pi) * CGFloat(bird.position.y) * 0.01, duration:1)
+                bird.run(roll, completion:{
                 self.bird.speed = 0
-            })
+                })
+            }
         }
     }
     
@@ -362,7 +368,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
     }
     
      func setupRingo() {
-        // アイテムの画像を読み込む
+        // りんごの画像を読み込む
         let ringoTexture = SKTexture(imageNamed: "ringo")
         ringoTexture.filteringMode = .linear
         // 移動する距離を計算（移動時間を壁と合わせる）
@@ -383,13 +389,13 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
 
         // 空の中央位置を基準にしてアイテムの中央位置を取得
         let ringo_center_y = sky_center_y - ringoTexture.size().height / 2
-        // アイテムを生成するアクションを作成
+        // りんごを生成するアクションを作成
         let createRingoAnimation = SKAction.run({
-            // アイテム関連のノードを乗せるノードを作成
+            // りんごのノードを乗せるノードを作成
             self.ringo = SKSpriteNode(texture: ringoTexture)
             // -random_y_range〜random_y_rangeの範囲のランダム値を生成
             let random_y = CGFloat.random(in: -random_y_range...random_y_range)
-            // アイテムの中央位置にランダム値を足して、表示位置を決定
+            // りんごの中央位置にランダム値を足して、表示位置を決定
             let ringo_y = ringo_center_y + random_y
             self.ringo.position = CGPoint(x: self.frame.size.width + ringoTexture.size().width / 2, y: ringo_y)
             self.ringo.zPosition = -50 // 雲より手前、地面より奥
@@ -404,62 +410,12 @@ class GameScene: SKScene, SKPhysicsContactDelegate {
             self.ringoNode.addChild(self.ringo)
             
         })
-        // アイテムを取得できなかった場合の次のアイテム作成までの時間待ちのアクションを作成
+        // 次のりんご作成までの時間待ちのアクションを作成
         let waitAnimation = SKAction.wait(forDuration: 9, withRange: 5)
-        // アイテムを作成->時間待ち->アイテムを作成を無限に繰り返すアクションを作成
+        // りんごを作成->時間待ち->りんごを作成を無限に繰り返すアクションを作成
         let repeatForeverAnimation = SKAction.repeatForever(SKAction.sequence([waitAnimation, createRingoAnimation]))
         ringoNode.run(repeatForeverAnimation)
     }
-    
-    func setupNashi() {
-       // アイテムの画像を読み込む
-       let nashiTexture = SKTexture(imageNamed: "nashi")
-        nashiTexture.filteringMode = .linear
-       // 移動する距離を計算（移動時間を壁と合わせる）
-       let wallTexture = SKTexture(imageNamed: "wall")
-       // 移動する距離を計算
-       let movingDistance = self.frame.size.width + wallTexture.size().width
-       // 画面外まで移動するアクションを作成
-       let moveNashi = SKAction.moveBy(x: -movingDistance, y: 0, duration:4)
-       // 自身を取り除くアクションを作成
-       let removeNashi = SKAction.removeFromParent()
-       // 2つのアニメーションを順に実行するアクションを作成
-       let nashiAnimation = SKAction.sequence([moveNashi, removeNashi])
-       // 位置の上下の振れ幅を120ptとする
-       let random_y_range: CGFloat = 120
-       // 空の中央位置(y座標)を取得
-       let groundSize = SKTexture(imageNamed: "ground").size()
-       let sky_center_y = groundSize.height + (self.frame.size.height - groundSize.height) / 2
-
-       // 空の中央位置を基準にしてアイテムの中央位置を取得
-       let ringo_center_y = sky_center_y - nashiTexture.size().height / 2
-       // アイテムを生成するアクションを作成
-       let createNashiAnimation = SKAction.run({
-           // アイテム関連のノードを乗せるノードを作成
-           self.nashi = SKSpriteNode(texture: nashiTexture)
-           // -random_y_range〜random_y_rangeの範囲のランダム値を生成
-           let random_y = CGFloat.random(in: -random_y_range...random_y_range)
-           // アイテムの中央位置にランダム値を足して、表示位置を決定
-           let nashi_y = ringo_center_y + random_y
-           self.nashi.position = CGPoint(x: self.frame.size.width + nashiTexture.size().width / 2, y: nashi_y)
-           self.nashi.zPosition = -50 // 雲より手前、地面より奥
-
-           // スプライトに物理演算を設定する
-           self.nashi.physicsBody = SKPhysicsBody(rectangleOf: nashiTexture.size())
-           self.nashi.physicsBody?.categoryBitMask = self.nashiCategory
-           // 動かないように設定する
-           self.nashi.physicsBody?.isDynamic = false
-           
-           self.nashi.run(nashiAnimation)
-           self.nashiNode.addChild(self.nashi)
-           
-       })
-       // アイテムを取得できなかった場合の次のアイテム作成までの時間待ちのアクションを作成
-       let waitAnimation = SKAction.wait(forDuration: 15, withRange: 5)
-       // アイテムを作成->時間待ち->アイテムを作成を無限に繰り返すアクションを作成
-       let repeatForeverAnimation = SKAction.repeatForever(SKAction.sequence([waitAnimation, createNashiAnimation]))
-       nashiNode.run(repeatForeverAnimation)
-   }
     
     // 画面をタップした時に呼ばれる
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
